@@ -112,6 +112,16 @@ cd ~/claude-usage-check-bdg && { git fetch -q --tags && git checkout -q v0.2.0 |
 `~/claude-usage-check-bdg` が無ければ A-1 の2つ目のコマンドで入れてから実行する。
 更新（fetch / checkout）に失敗しても、`python3 bdg_stats.py` は必ず実行する。
 
+**続けてすぐに（間をあけずに）**、C-2b の「数字のまとめ」を作って、手元のファイルに残しておく。
+共有ドライブに置いたファイルは、井上の見回りで15分ほどのうちに移されるため、あとから読み直すと読めないことがある。
+
+```bash
+cd ~/claude-usage-check-bdg && python3 bdg_stats.py --markdown --from <対象期間の初日> --to <対象期間の最終日> > ~/claude-usage-check/.tmp-numbers.md
+```
+
+- 対象期間は C-0 で決めたもの（初回は `--from` `--to` を付けない）
+- 出力の中身が「（対象期間のデータがありません）」だけなら、利用者に伝えて止まる
+
 結果を利用者に報告する。
 
 ### C. 使用内容サマリーを作って送る（毎回）
@@ -189,14 +199,12 @@ cd ~/claude-usage-check-bdg && { git fetch -q --tags && git checkout -q v0.2.0 |
 
 #### C-2b. 数字のまとめ（量・任せ方）を作る
 
-B を実行したあとに、次のコマンドの出力を **そのまま** summary.md の C-2 の指定の位置に貼る。数字を自分で計算し直したり、書き換えたりしない。
+B の最後に作っておいた `~/claude-usage-check/.tmp-numbers.md` の中身を、**そのまま** summary.md の C-2 の指定の位置に貼る。数字を自分で計算し直したり、書き換えたりしない。
 
-```bash
-cd ~/claude-usage-check-bdg && python3 bdg_stats.py --markdown --from <対象期間の初日> --to <対象期間の最終日>
-```
-
+- **共有ドライブのファイルを読み直して作り直さない**（すでに井上の見回りで移されていて、空になることがあるため）
+- `.tmp-numbers.md` が無いときだけ、B の最後のコマンドをもう一度実行する。それでも「（対象期間のデータがありません）」なら、B（数字を送る）からやり直す
 - 日付は `YYYY-MM-DD` の形（例: `--from 2026-11-01 --to 2026-11-30`）。対象期間は C-0 で決めたもの
-- 初回だけは `--from` `--to` を付けない
+- 貼り終えたら `~/claude-usage-check/.tmp-numbers.md` は消す
 
 出てくる項目:
 - 量: 人の発言数・AI の応答数／トークン数・API 換算の金額（円）／モデル別の内訳／使った日数・使用時間帯・日別の推移
