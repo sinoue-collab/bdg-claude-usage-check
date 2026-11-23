@@ -22,7 +22,24 @@ import tempfile
 from collections import defaultdict
 from datetime import datetime
 
-VERSION = "2"
+VERSION = "3"
+
+# 日本の祝日（振替休日・国民の休日を含む）。内閣府の「国民の祝日」の一覧から。
+# この一覧に無い年は、祝日を見分けずに月〜金を平日として数える（年が変わる前に足す）
+JP_HOLIDAYS = set("""
+2025-01-01 2025-01-13 2025-02-11 2025-02-23 2025-02-24 2025-03-20 2025-04-29 2025-05-03 2025-05-04
+2025-05-05 2025-05-06 2025-07-21 2025-08-11 2025-09-15 2025-09-23 2025-10-13 2025-11-03 2025-11-23
+2025-11-24
+2026-01-01 2026-01-12 2026-02-11 2026-02-23 2026-03-20 2026-04-29 2026-05-03 2026-05-04 2026-05-05
+2026-05-06 2026-07-20 2026-08-11 2026-09-21 2026-09-22 2026-09-23 2026-10-12 2026-11-03 2026-11-23
+2027-01-01 2027-01-11 2027-02-11 2027-02-23 2027-03-21 2027-03-22 2027-04-29 2027-05-03 2027-05-04
+2027-05-05 2027-07-19 2027-08-11 2027-09-20 2027-09-23 2027-10-11 2027-11-03 2027-11-23
+""".split())
+
+
+def is_weekday_daytime(ts):
+    """平日（月〜金で、祝日でない日）の 9:00〜17:59 か（PC の時刻）"""
+    return ts.weekday() < 5 and ts.date().isoformat() not in JP_HOLIDAYS and 9 <= ts.hour < 18
 JPY_PER_USD = 150  # 円換算のレート（仮・2026-11-21。井上が決めたら直す）
 BREAK_MINUTES = 10  # これより長く空いたら休憩とみなす
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".claude-usage-check", "config.json")
@@ -183,7 +200,7 @@ def collect():
             if kind == "prompt":
                 if not auto:
                     r["human_prompts"] += 1
-                    if ts.weekday() < 5 and 9 <= ts.hour < 18:  # 平日 9:00〜17:59（Mac の時刻）
+                    if is_weekday_daytime(ts):  # 平日（祝日を除く）9:00〜17:59
                         r["daytime_prompts"] += 1
             elif kind == "response":
                 r["ai_responses"] += 1
@@ -339,7 +356,7 @@ def cmd_markdown(a):
     L.append("- 使った日数: %d 日（期間 %d 日のうち。人の発言がある日）" % (T["active_days"], span))
     if T["human_prompts"]:
         day_pct = 100.0 * T["daytime_prompts"] / T["human_prompts"]
-        L.append("- 使用時間帯: 平日日中 %.0f%%・夜間/休日 %.0f%%（人の発言の時刻。平日日中＝月〜金 9:00〜18:00）"
+        L.append("- 使用時間帯: 平日日中 %.0f%%・夜間/休日 %.0f%%（人の発言の時刻。平日日中＝月〜金・祝日を除く 9:00〜18:00）"
                  % (day_pct, 100 - day_pct))
     L.append("")
     L.append("**モデル別の内訳**")
