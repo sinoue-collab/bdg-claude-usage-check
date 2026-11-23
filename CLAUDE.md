@@ -26,6 +26,23 @@ BDG スタッフ各自の Mac から、Claude Code の **使用量（数字）**
 - クラウドで動いているときは、**何も作らず・何も送らずに止まり**、利用者に次のとおり伝える
   > この会話はクラウドで動いているため、あなたの PC の使用量を読めません。Claude デスクトップアプリの「コード」で新しい会話を始め、動かす場所を「この PC（ローカル）」にしてから、同じ文をもう一度貼ってください。
 
+### 0-2. 必要な道具がそろっているか確かめる（初回）
+
+この仕組みには **Git・Python 3・Google ドライブ（パソコン版）** の3つが要る。最初に3つともあるかを調べ、足りないものを利用者に伝える。
+**会社（井上）の方針で、Git・Python・Google ドライブは、利用者の OK をもらえば Claude が入れてよい**（2026-11-23 決定）。入れる前に、何を入れるかを利用者に伝えて OK をもらう。
+
+| 道具 | あるかの確かめ方 | 無いときの入れ方（Windows） | 無いときの入れ方（Mac） |
+|---|---|---|---|
+| Git | `git --version` | `winget install --id Git.Git -e --source winget` | `xcode-select --install`（Apple の公式の開発ツール。Git と Python 3 が入る） |
+| Python 3 | Windows: `py -3 --version`（`python` は Microsoft Store の入口だけのことがあるので使わない）／Mac: `python3 --version` | `winget install --id Python.Python.3.12 -e --source winget` | 上と同じ |
+| Google ドライブ（パソコン版） | Windows: エクスプローラーに「Google Drive（G:）」などがあるか／Mac: `~/Library/CloudStorage/GoogleDrive-*` があるか | `winget install --id Google.GoogleDrive -e --source winget` | https://www.google.com/drive/download/ から入れる（利用者に頼む） |
+
+- 入れたあとに `git` や `py` が見つからないと言われたら、Claude Code の会話をいったん閉じて開き直すよう利用者に頼む（新しく入れた道具の場所が、開き直すまで反映されないため）
+- 「管理者の許可」の画面が出たら、利用者に「はい」を押してもらう
+- **Google ドライブは、入れたあとに利用者が会社のアカウントでログインする**必要がある（Claude はログインしない）。ログイン後、共有ドライブ「10_BLUE DESIGN GROUP」の中の「BDG Claude 使用量」が見えるか確かめる。見えなければ「井上に共有ドライブの権限を頼んでください」と伝えて止まる
+- 3つそろうまでは A 以降に進まない（途中で何かを書いたり送ったりしない）
+- 以下の手順で `python3` と書いてあるところは、Windows では `py -3` に置き換える
+
 ### A. 初回セットアップ（まだセットアップしていない場合）
 
 #### A-1. ツールの導入
@@ -77,7 +94,7 @@ cd ~/claude-usage-check && python3 usage_check.py retention --days 90
 
 #### Windows の場合
 - コマンドは Claude Code の bash（Git Bash）で実行する
-- `python3` が見つからない・何も起きない場合は、`python3` を `py` または `python` に置き換えて実行する（以下のすべてのコマンドで同じ）
+- `python3` は `py -3` に置き換えて実行する（以下のすべてのコマンドで同じ。`python`・`python3` は Microsoft Store の入口だけのことがある）
 
 ### B. 使用量の数字を送る（毎回）
 
