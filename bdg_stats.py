@@ -49,17 +49,11 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 PC_TOOL_HINTS = ("claude-in-chrome", "computer-use", "computer_", "Claude_Browser", "orca computer",
                  "playwright")
-AUTO_PROMPT_HEADS = ("<scheduled-task",)
+AUTO_PROMPT_HEADS = ("<scheduled-task",)  # スケジュール済みのタスクが自動で入れる発言
 # 使用上限に当たったときに Claude Code が入れる知らせ（AI の応答の代わりに出る）
 LIMIT_TEXT_HEADS = ("You've hit your", "Claude AI usage limit reached")
 COMMAND_RE = re.compile(r"<command-name>/([^<\s]+)</command-name>")
-# Claude Code に最初から入っているコマンド（スキルではないので数えない）
-BUILTIN_COMMANDS = set("""
-add-dir agents bashes bug clear compact config context cost doctor exit export fast feedback help hooks ide
-init install-github-app login logout mcp memory migrate-installer model output-style permissions plugin
-plugins pr-comments privacy-settings rate-limit-options release-notes resume rewind status statusline
-terminal-setup theme todos upgrade usage vim effort tasks remote-control review security-review
-""".split())  # スケジュール済みのタスクが自動で入れる発言
+SKILL_NAME_MAX = 60
 NOT_HUMAN_HEADS = ("<task-notification", "<local-command-stdout", "<local-command-stderr",
                    "<local-command-caveat", "<bash-stdout", "<bash-stderr",
                    "<command-name>/clear", "<command-name>/compact",
@@ -131,26 +125,41 @@ def new_day():
 
 
 def limit_hit(d, msg):
-    """使用上限に当たった知らせか（AI の応答の代わりに出る、中身が空の応答）"""
-    if d.get("error") == "rate_limit" or d.get("apiErrorStatus") == 429:
-        return True
+    """使用上限に当たった知らせなら、その本文（解除の時刻を含む。まとめるのに使う）か True。違えば False。
+    混み合いによる一時的な制限（429 だが上限の知らせではないもの）は数えない"""
     for b in msg.get("content") or []:
-        if isinstance(b, dict) and b.get("type") == "text" and (b.get("text") or "").startswith(LIMIT_TEXT_HEADS):
-            return True
-    return False
+        if isinstance(b, dict) and b.get("type") == "text":
+            t = (b.get("text") or "").replace("\u2019", "'")
+            if t.startswith(LIMIT_TEXT_HEADS):
+                return t[:120]
+    return d.get("error") == "rate_limit" and d.get("isApiErrorMessage") is True
 
 
-def command_skill(d):
-    """人が打ったスラッシュコマンドのうち、スキル（/finance など）の名前。最初から入っているコマンドは None"""
+def command_name(d):
+    """人が打ったスラッシュコマンドの名前（/ を除く）。人が打った発言でなければ None"""
+    head = human_prompt_head(d)  # サブエージェント・自動挿入・圧縮の要約・道具の結果を除く条件は人の発言と同じ
+    if head is None or not head.startswith("<command-"):
+        return None
     c = (d.get("message") or {}).get("content")
     if isinstance(c, list):
         c = " ".join(b.get("text") or "" for b in c if isinstance(b, dict) and b.get("type") == "text")
-    if not isinstance(c, str) or "<command-name>" not in c:
-        return None
-    m = COMMAND_RE.search(c)
-    if not m or m.group(1) in BUILTIN_COMMANDS:
-        return None
-    return m.group(1)
+    m = COMMAND_RE.search(c or "")
+    return m.group(1)[:SKILL_NAME_MAX] if m else None
+
+
+def known_skills(cwds):
+    """この PC にあるスキル・自作コマンドの名前。最初から入っているコマンド（/model など）と見分けるために使う。
+    ~/.claude と、会話で使ったフォルダの .claude の skills/・commands/、プラグインの skills/・commands/"""
+    names = set()
+    bases = [claude_dir()] + [os.path.join(c, ".claude") for c in cwds]
+    for base in bases:
+        for sub in ("skills", "commands"):
+            for p in glob.glob(os.path.join(base, sub, "*")):
+                names.add(os.path.splitext(os.path.basename(p))[0])
+    for p in glob.glob(os.path.join(claude_dir(), "plugins", "**", "skills", "*"), recursive=True) + \
+            glob.glob(os.path.join(claude_dir(), "plugins", "**", "commands", "*.md"), recursive=True):
+        names.add(os.path.splitext(os.path.basename(p))[0])
+    return names
 
 
 def collect():
@@ -158,6 +167,8 @@ def collect():
     sessions = defaultdict(lambda: {"entrypoint": None, "first_prompt": None, "first_ts": None,
                                     "times": [], "events": []})
     seen_msg, seen_tool, seen_uuid = set(), set(), set()
+    seen_limit = set()
+    cwds = set()
     for path in files:
         try:
             f = open(path, encoding="utf-8", errors="ignore")
@@ -182,13 +193,15 @@ def collect():
                 if s["entrypoint"] is None and d.get("entrypoint"):
                     s["entrypoint"] = d["entrypoint"]
                 msg = d.get("message") or {}
+                if d.get("cwd"):
+                    cwds.add(d["cwd"])
                 if t == "user":
-                    sk = command_skill(d) if not d.get("isSidechain") else None
-                    if sk:
+                    cmd = command_name(d)
+                    if cmd:
                         uid = d.get("uuid")
                         if not uid or ("cmd", uid) not in seen_uuid:
                             seen_uuid.add(("cmd", uid))
-                            s["events"].append((ts, "skill", sk))
+                            s["events"].append((ts, "command", cmd))
                     head = human_prompt_head(d)
                     if head is None or head.startswith(NOT_HUMAN_HEADS):
                         continue
@@ -205,10 +218,13 @@ def collect():
                     continue
                 model = msg.get("model") or ""
                 if model.startswith("<"):
-                    uid = d.get("uuid")
-                    if limit_hit(d, msg) and (not uid or ("limit", uid) not in seen_uuid):
-                        seen_uuid.add(("limit", uid))
-                        s["events"].append((ts, "limit", None))
+                    reset = limit_hit(d, msg)
+                    if reset and not d.get("isSidechain"):
+                        # 同じ上限（解除の時刻が同じ知らせ）の続きは1回にまとめる。送り直し・同時に開いた会話で重ならないように
+                        key = reset if reset is not True else (d.get("uuid") or ts.isoformat())
+                        if key not in seen_limit:
+                            seen_limit.add(key)
+                            s["events"].append((ts, "limit", None))
                     continue
                 key = (msg.get("id"), d.get("requestId"))
                 if key == (None, None) or key not in seen_msg:
@@ -232,9 +248,10 @@ def collect():
                         fp = hashlib.sha1(p.encode("utf-8")).hexdigest()[:12] if p else None
                     s["events"].append((ts, "tool", (name, fp)))
                     if name == "Skill":
-                        sk = str((b.get("input") or {}).get("skill") or "")[:60]
+                        sk = str((b.get("input") or {}).get("skill") or "")[:SKILL_NAME_MAX]
                         if sk:
                             s["events"].append((ts, "skill", sk))
+    skill_names = known_skills(cwds)
     days = defaultdict(new_day)
     all_times = {False: [], True: []}  # 人が操作した会話 / 自動実行 の時刻をまとめる
     for sid, s in sessions.items():
@@ -252,8 +269,12 @@ def collect():
                         r["daytime_prompts"] += 1
             elif kind == "limit":
                 r["limit_hits"] += 1
-            elif kind == "skill":
-                r["skills"][extra] += 1
+            elif kind == "skill":  # AI が使ったスキル（人が操作した会話の分だけ）
+                if not auto:
+                    r["skills"][extra] += 1
+            elif kind == "command":  # 人が打ったスラッシュコマンド。この PC にあるスキル・自作コマンドだけ数える
+                if not auto and (extra in skill_names or ":" in extra):
+                    r["skills"][extra] += 1
             elif kind == "response":
                 r["ai_responses"] += 1
                 if auto:
@@ -363,6 +384,8 @@ def cmd_markdown(a):
     models = defaultdict(lambda: defaultdict(float))
     skills = defaultdict(int)
     rows = []
+    no_v4_days = 0  # 上限・スキルを数える前の版（version 3 まで）で集計した日
+    st_days, st_prompts = 0, 0  # 追加集計（stats）がある日のうち、人の発言がある日の数と発言数
     fallback_days = 0
     for d in days:
         u, s = usage.get(d) or {}, stats.get(d) or {}
@@ -385,6 +408,11 @@ def cmd_markdown(a):
             T[k] += s.get(k) or 0
         for name, n in (s.get("skills") or {}).items():
             skills[name] += n
+        if d in stats and "limit_hits" not in s and (s.get("human_prompts") or s.get("ai_responses")):
+            no_v4_days += 1
+        if d in stats and s.get("human_prompts"):
+            st_days += 1
+            st_prompts += s.get("human_prompts")
         for name, m in (u.get("models") or {}).items():
             tok = sum(m.get(k) or 0 for k in ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h"))
             models[name]["responses"] += m.get("responses") or 0
@@ -440,21 +468,23 @@ def cmd_markdown(a):
              % (auto_pct, T["auto_sessions"], fmt_minutes(T["auto_minutes"])))
     L.append("- ファイルの編集: **%d 回**（のべ %d ファイル）" % (T["file_edits"], T["files_edited"]))
     L.append("- ブラウザ・PC 操作を AI に任せた回数: %d 回" % T["pc_ops"])
-    L.append("- 使用上限に当たった回数: **%d 回**（「上限に達しました」で止まった回数）" % T["limit_hits"])
+    L.append("- 使用上限で止まった回数: **%d 回**（「上限に達しました」の知らせ。同じ上限の続きは1回にまとめる）" % T["limit_hits"])
     if skills:
         top = sorted(skills.items(), key=lambda x: -x[1])[:5]
-        L.append("- よく使ったスキル: " + "、".join("%s（%d回）" % (n, c) for n, c in top))
-    if T["active_days"]:
+        L.append("- よく使ったスキル: " + "、".join("`%s`（%d回）" % (n, c) for n, c in top))
+    if no_v4_days:
+        L.append("- ※ %d 日分は、上限・スキルを数える前の版で集計したため、その日の上限・スキルは入っていない" % no_v4_days)
+    if st_days:
         L.append("")
-        L.append("**平均**")
+        L.append("**平均**（追加集計がある日の、人が操作した会話。金額は自動実行の分も含む）")
         L.append("")
         L.append("- 使った日1日あたり: 人の発言 %.1f 回・AI と作業した時間 %s・金額 約 ¥%s"
-                 % (T["prompts"] / T["active_days"], fmt_minutes(T["work_minutes"] / T["active_days"]),
-                    "{:,.0f}".format(T["cost"] * rate / T["active_days"])))
-    if T["work_minutes"] >= 1:
+                 % (st_prompts / st_days, fmt_minutes(T["work_minutes"] / st_days),
+                    "{:,.0f}".format(T["cost"] * rate / T["active_days"]) if T["active_days"] else "—"))
+    if T["work_minutes"] >= 6:
         hours = T["work_minutes"] / 60.0
-        L.append("- AI と作業した1時間あたり: 人の発言 %.1f 回・AI の動作 %.0f 回・金額 約 ¥%s"
-                 % (T["human_prompts"] / hours, manual_tools / hours, "{:,.0f}".format(T["cost"] * rate / hours)))
+        L.append("- AI と作業した1時間あたり: 人の発言 %.1f 回・AI の動作 %.0f 回"
+                 % (T["human_prompts"] / hours, manual_tools / hours))
     if fallback_days:
         L.append("")
         L.append("※ %d 日分は追加集計（stats.json）が無いため、人の発言は元の道具の数で補った。"
