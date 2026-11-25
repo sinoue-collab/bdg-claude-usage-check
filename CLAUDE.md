@@ -53,10 +53,10 @@ cd ~ && git clone https://github.com/yujirotn/claude-usage-check && cd claude-us
 あわせて、BDG の追加集計（任せ方の数字）を入れる。`~/claude-usage-check-bdg/.git` が存在しなければ、次を実行する。
 
 ```bash
-cd ~ && git clone https://github.com/sinoue-collab/bdg-claude-usage-check claude-usage-check-bdg && cd claude-usage-check-bdg && git checkout -q v0.2.1
+cd ~ && git clone https://github.com/sinoue-collab/bdg-claude-usage-check claude-usage-check-bdg && cd claude-usage-check-bdg && git checkout -q v0.2.2
 ```
 
-（版は `v0.2.1` に固定する。井上が確認した版だけが動くようにするため）
+（版は `v0.2.2` に固定する。井上が確認した版だけが動くようにするため）
 
 #### A-2. 利用者の名前を確認
 「BDG での表示名を教えてください（例: 井上紗矢香）」と聞く。この名前はファイル名に使われる。
@@ -103,7 +103,7 @@ cd ~/claude-usage-check && python3 usage_check.py collect
 続けて、BDG の追加集計（任せ度・作業時間・自動実行・ファイル編集など）を送る。
 
 ```bash
-cd ~/claude-usage-check-bdg && { git fetch -q --tags && git checkout -q v0.2.1 || echo "更新できなかったので、手元の版で続けます"; } ; python3 bdg_stats.py
+cd ~/claude-usage-check-bdg && { git fetch -q --tags && git checkout -q v0.2.2 || echo "更新できなかったので、手元の版で続けます"; } ; python3 bdg_stats.py
 ```
 
 共有ドライブに `<利用者の名前>.stats.json` が書かれる（数字だけ。会話の本文・ファイル名は入らない）。
@@ -206,7 +206,7 @@ B の最後に作っておいた `~/claude-usage-check/.tmp-numbers.md` の中�
 
 出てくる項目:
 - 量: 人の発言数・AI の応答数／トークン数・API 換算の金額（円）／モデル別の内訳／使った日数・使用時間帯・日別の推移
-- 任せ方: 任せ度（発言1回で AI が何回動いたか）／AI と作業した時間／自動実行の割合／ファイルの編集回数／ブラウザ・PC 操作を任せた回数
+- 任せ方: 任せ度（発言1回で AI が何回動いたか）／AI と作業した時間／自動実行の割合／ファイルの編集回数／ブラウザ・PC 操作を任せた回数／使用上限に当たった回数／よく使ったスキル／平均（使った日1日あたり・作業1時間あたり）
 
 #### C-3. 個人情報・個人資産のマスク
 
